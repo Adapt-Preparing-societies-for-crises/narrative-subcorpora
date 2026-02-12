@@ -5,3 +5,11 @@ This repo contains code to construct subcorpora of historical text data around p
 - preprocessing text data into 1) ngrams 2) and document embeddings
 - identifying relevant texts based on keywords
 - narrowing keyword-based selection based on additional (embedding-based) metrics
+
+## Text Storage
+
+## Text Preprocessing
+
+## Keyword-Based Event Subsets
+
+## Filtering and Narrowing
