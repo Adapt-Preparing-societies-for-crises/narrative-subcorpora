@@ -100,3 +100,31 @@ def extract(corpus, events_path, event_label, window, min_score, text_col, date_
         sub.to_parquet(out)
 
     click.echo(f"Extracted {len(sub)} texts → {out}")
+
+
+# ── diagnose ──────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--corpus", required=True, type=click.Path(exists=True), help="Parquet corpus file.")
+@click.option("--events", "events_path", required=True, type=click.Path(exists=True), help="Events JSON file.")
+@click.option("--event", "event_label", required=True, help="Event label.")
+@click.option("--window", default="6m", help="Time window after event (e.g. 6m).")
+@click.option("--min-score", default=0.0, type=float, help="Score threshold for selection.")
+@click.option("--text-col", default="text", help="Name of the text column.")
+@click.option("--date-col", default="date", help="Name of the date column.")
+@click.option("-o", "--output", default=None, help="Save figure to file (png, pdf, svg).")
+def diagnose(corpus, events_path, event_label, window, min_score, text_col, date_col, output):
+    """Visualise selection diagnostics for an event subcorpus."""
+    from .diagnostics import selection_report, score_distribution
+
+    c = Corpus(corpus, text_col=text_col, date_col=date_col)
+    ev = Event.from_json(events_path, event_label)
+    months = _parse_window(window)
+
+    sub = c.after(ev, months=months).score(terms=ev.terms)
+    filtered = sub.above(min_score) if min_score > 0 else sub
+
+    selection_report(c, ev, filtered, months=months, output=output)
+    if not output:
+        import matplotlib.pyplot as plt
+        plt.show()
