@@ -241,9 +241,95 @@ class Subcorpus:
         )
         return self
 
+    def embed(
+        self,
+        model: str = "all-MiniLM-L6-v2",
+        *,
+        batch_size: int = 64,
+        show_progress: bool = True,
+    ) -> Subcorpus:
+        """Compute embeddings for all texts.
+
+        Stores the embedding matrix on the subcorpus for use by
+        ``.score_outlier()`` and ``.score_similarity()``.  Requires
+        ``sentence-transformers``::
+
+            pip install narrative-subcorpora[embeddings]
+        """
+        from .embed import embed_texts
+
+        texts = self._df[self.text_col].astype(str).tolist()
+        self._embeddings = embed_texts(
+            texts, model, batch_size=batch_size, show_progress=show_progress,
+        )
+        self._embed_model = model
+        return self
+
+    def score_outlier(
+        self,
+        *,
+        method: str = "centroid",
+        k: int = 5,
+        col: str = "score_outlier",
+    ) -> Subcorpus:
+        """Add an outlier score column based on embeddings.
+
+        Call ``.embed()`` first.  Higher scores = more outlier-like.
+
+        Parameters
+        ----------
+        method : str
+            ``"centroid"`` — cosine distance from subcorpus centroid.
+            ``"knn"`` — average cosine distance to *k* nearest neighbours.
+        k : int
+            Number of neighbours (only used when method is ``"knn"``).
+        col : str
+            Name of the output column.
+        """
+        from .embed import centroid_distance_scores, knn_distance_scores
+
+        if not hasattr(self, "_embeddings"):
+            raise RuntimeError("Call .embed() before .score_outlier()")
+        if method == "knn":
+            scores = knn_distance_scores(self._embeddings, k=k)
+        else:
+            scores = centroid_distance_scores(self._embeddings)
+        self._df[col] = scores
+        return self
+
+    def score_similarity(
+        self,
+        terms: list[str],
+        model: str | None = None,
+        *,
+        batch_size: int = 64,
+        col: str = "score_similarity",
+    ) -> Subcorpus:
+        """Score texts by embedding similarity to seed *terms*.
+
+        Embeds the seed terms, averages them, and computes cosine
+        similarity to each text embedding.  Call ``.embed()`` first.
+        """
+        from .embed import embed_texts, seed_similarity_scores, _load_model
+
+        if not hasattr(self, "_embeddings"):
+            raise RuntimeError("Call .embed() before .score_similarity()")
+        m = model or getattr(self, "_embed_model", "all-MiniLM-L6-v2")
+        seed_emb = embed_texts(terms, m, batch_size=batch_size, show_progress=False)
+        self._df[col] = seed_similarity_scores(self._embeddings, seed_emb)
+        return self
+
     def above(self, threshold: float, *, col: str = "score") -> Subcorpus:
         """Keep only rows where *col* >= *threshold*."""
         self._df = self._df[self._df[col] >= threshold].reset_index(drop=True)
+        return self
+
+    def below(self, threshold: float, *, col: str = "score_outlier") -> Subcorpus:
+        """Keep only rows where *col* <= *threshold*.
+
+        Useful for removing outliers: ``sub.below(0.5, col="score_outlier")``.
+        """
+        self._df = self._df[self._df[col] <= threshold].reset_index(drop=True)
         return self
 
     # ------------------------------------------------------------------
