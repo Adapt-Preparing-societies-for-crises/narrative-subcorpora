@@ -299,6 +299,117 @@ sub = sub.above(5.0, col="score_bm25")
 | `threshold` | `float` | required | Minimum score to keep |
 | `col` | `str` | `"score"` | Which score column to filter on |
 
+#### `.below(threshold, col="score_outlier")`
+
+Keep only rows where a score column is at or below a threshold. The complement of `.above()` — useful for removing outliers.
+
+```python
+# Remove texts with high outlier scores
+sub = sub.below(0.5, col="score_outlier")
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `threshold` | `float` | required | Maximum score to keep |
+| `col` | `str` | `"score_outlier"` | Which score column to filter on |
+
+### Embedding-based scoring
+
+These methods use sentence-transformers to compute dense vector representations of your texts and score them based on semantic content rather than keyword matching. Requires the optional `embeddings` dependency:
+
+```bash
+pip install narrative-subcorpora[embeddings]
+```
+
+#### `.embed(model="all-MiniLM-L6-v2", batch_size=64, show_progress=True)`
+
+Compute embeddings for all texts in the subcorpus. This must be called before `.score_outlier()` or `.score_similarity()`. The embeddings are stored internally on the subcorpus object.
+
+```python
+sub = corpus.after(event, months=6).embed("all-MiniLM-L6-v2")
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `model` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformers model name. Any model from [HuggingFace](https://huggingface.co/models?library=sentence-transformers) works |
+| `batch_size` | `int` | `64` | Batch size for encoding |
+| `show_progress` | `bool` | `True` | Show a progress bar |
+
+Some recommended models:
+
+| Model | Speed | Quality | Notes |
+|---|---|---|---|
+| `all-MiniLM-L6-v2` | Fast | Good | Good default, English-focused |
+| `paraphrase-multilingual-MiniLM-L12-v2` | Medium | Good | Multilingual, good for Dutch |
+| `all-mpnet-base-v2` | Slower | Best | Highest quality, English-focused |
+
+#### `.score_outlier(method="centroid", k=5, col="score_outlier")`
+
+Add an outlier score column. Higher scores mean the text is more unlike the rest of the subcorpus. Call `.embed()` first.
+
+Two methods are available:
+
+- **centroid** — cosine distance from the subcorpus centroid (the "average" text). Fast and simple. Finds texts that are globally different from the majority.
+- **knn** — average cosine distance to the *k* nearest neighbours. Finds texts in sparse regions, even if they are not far from the centroid.
+
+```python
+# Centroid method (default)
+sub = sub.score_outlier()
+
+# kNN method
+sub = sub.score_outlier(method="knn", k=10, col="score_outlier_knn")
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `method` | `str` | `"centroid"` | `"centroid"` or `"knn"` |
+| `k` | `int` | `5` | Number of neighbours (knn method only) |
+| `col` | `str` | `"score_outlier"` | Name of the output column |
+
+#### `.score_similarity(terms, model=None, batch_size=64, col="score_similarity")`
+
+Score each text by its embedding similarity to the seed terms. Embeds the seed terms, averages them into a single vector, and computes cosine similarity to each text. Call `.embed()` first.
+
+Values range from -1 to 1, where 1 means the text is semantically very similar to the seed terms.
+
+```python
+sub = sub.score_similarity(terms=event.terms)
+
+# Use a subset of seed terms for a more focused signal
+sub = sub.score_similarity(terms=event.terms[:10], col="score_sim_core")
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `terms` | `list[str]` | required | Seed terms to compare against |
+| `model` | `str` or `None` | `None` | Model for embedding the terms. If `None`, reuses the model from `.embed()` |
+| `batch_size` | `int` | `64` | Batch size for encoding terms |
+| `col` | `str` | `"score_similarity"` | Name of the output column |
+
+#### Full embedding workflow
+
+```python
+from narrative_subcorpora import Corpus, Event
+
+corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "spaanse_griep")
+
+sub = (
+    corpus
+    .after(event, months=6)
+    .score(terms=event.terms)                     # keyword score
+    .embed("paraphrase-multilingual-MiniLM-L12-v2")  # compute embeddings
+    .score_outlier(method="centroid")              # outlier score
+    .score_outlier(method="knn", k=5, col="score_outlier_knn")
+    .score_similarity(terms=event.terms)           # semantic similarity
+    .above(0.05, col="score")                      # keep keyword-relevant texts
+    .below(0.5, col="score_outlier")               # remove outliers
+)
+
+df = sub.to_dataframe()
+# df has: date, ocr, [metadata...], score, score_outlier, score_outlier_knn, score_similarity
+```
+
 ### Export
 
 All export methods preserve every column — your original metadata, the text, dates, and any score columns you added.
@@ -543,6 +654,78 @@ Maximum concentration of distinct seed terms in any single word-window. Returns 
 Weighted coverage score. `term_weights` is a `dict[str, float]` mapping terms to importance weights.
 
 
+## Low-level embedding functions
+
+These are the building blocks used internally by `Subcorpus.embed()`, `.score_outlier()`, and `.score_similarity()`. You can use them directly for custom workflows.
+
+```python
+from narrative_subcorpora.embed import (
+    embed_texts,
+    centroid_distance_scores,
+    knn_distance_scores,
+    seed_similarity_scores,
+    outlier_scores,
+)
+```
+
+### `embed_texts(texts, model, batch_size=64, show_progress=True)`
+
+Encode a list of texts into an embedding matrix. Returns a numpy array of shape `(n, embedding_dim)`.
+
+```python
+import numpy as np
+from narrative_subcorpora.embed import embed_texts
+
+texts = ["De griep breekt uit", "Het weer is mooi"]
+embeddings = embed_texts(texts, "all-MiniLM-L6-v2", show_progress=False)
+print(embeddings.shape)  # (2, 384)
+```
+
+### `centroid_distance_scores(embeddings)`
+
+Cosine distance from each embedding to the centroid. Returns values in [0, 2] where 0 = identical to centroid.
+
+```python
+from narrative_subcorpora.embed import centroid_distance_scores
+
+scores = centroid_distance_scores(embeddings)
+```
+
+### `knn_distance_scores(embeddings, k=5)`
+
+Average cosine distance to the *k* nearest neighbours. Returns values in [0, 2].
+
+```python
+from narrative_subcorpora.embed import knn_distance_scores
+
+scores = knn_distance_scores(embeddings, k=3)
+```
+
+### `seed_similarity_scores(embeddings, seed_embedding)`
+
+Cosine similarity between each text embedding and a seed embedding (or averaged seed embeddings). Returns values in [-1, 1].
+
+```python
+from narrative_subcorpora.embed import embed_texts, seed_similarity_scores
+
+text_embs = embed_texts(texts, "all-MiniLM-L6-v2", show_progress=False)
+seed_embs = embed_texts(["griep", "epidemie"], "all-MiniLM-L6-v2", show_progress=False)
+scores = seed_similarity_scores(text_embs, seed_embs)
+```
+
+### `outlier_scores(texts, model, method="centroid", k=5, ...)`
+
+Convenience function: embed texts and compute outlier scores in one call. Returns `(embeddings, scores)`.
+
+```python
+from narrative_subcorpora.embed import outlier_scores
+
+embeddings, scores = outlier_scores(
+    texts, "all-MiniLM-L6-v2", method="knn", k=5, show_progress=False
+)
+```
+
+
 ## Complete examples
 
 ### Basic workflow
@@ -626,4 +809,55 @@ for event in events:
     )
     sub.to_parquet(f"{event.label}_subcorpus.parquet")
     print(f"{event.label}: {len(sub)} articles")
+```
+
+### Embedding-based outlier removal
+
+Use embeddings to find and remove articles that passed keyword filtering but are semantically off-topic.
+
+```python
+from narrative_subcorpora import Corpus, Event
+
+corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "spaanse_griep")
+
+sub = (
+    corpus
+    .after(event, months=6)
+    .score(terms=event.terms)
+    .above(0.05)                                      # loose keyword filter first
+    .embed("paraphrase-multilingual-MiniLM-L12-v2")   # compute embeddings
+    .score_outlier(method="centroid")                  # flag outliers
+    .below(0.5, col="score_outlier")                   # remove outliers
+)
+
+sub.to_csv("clean_subcorpus.csv")
+print(f"Kept {len(sub)} articles after outlier removal")
+```
+
+### Combine keyword and semantic scoring
+
+Use keyword scores for initial filtering, then rank by semantic similarity to the seed terms.
+
+```python
+from narrative_subcorpora import Corpus, Event
+
+corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "spaanse_griep")
+
+sub = (
+    corpus
+    .after(event, months=6)
+    .score(terms=event.terms)                         # keyword coverage
+    .above(0.03)                                      # keep anything mentioning a few terms
+    .embed("paraphrase-multilingual-MiniLM-L12-v2")
+    .score_similarity(terms=event.terms)              # semantic similarity to seed terms
+    .score_outlier()                                  # outlier detection
+)
+
+df = sub.to_dataframe()
+
+# Sort by semantic similarity — most relevant first
+df = df.sort_values("score_similarity", ascending=False)
+print(df[["date", "score", "score_similarity", "score_outlier"]].head(20))
 ```
