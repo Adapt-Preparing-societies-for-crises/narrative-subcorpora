@@ -43,6 +43,14 @@ class Corpus:
         date_col: str = "date",
     ):
         self.path = Path(path)
+        schema = pq.read_schema(self.path)
+        columns = schema.names
+        for name, col in [("text_col", text_col), ("date_col", date_col)]:
+            if col not in columns:
+                raise KeyError(
+                    f"{name}='{col}' not found. "
+                    f"Available columns: {columns}"
+                )
         self.text_col = text_col
         self.date_col = date_col
 
