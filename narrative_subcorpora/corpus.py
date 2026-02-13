@@ -1,0 +1,185 @@
+"""Corpus and Subcorpus classes — fluent API for querying parquet data."""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+from dateutil.relativedelta import relativedelta
+
+from .event import Event
+from .score import combined_score
+
+
+class Corpus:
+    """A parquet-backed text corpus with a fluent query API.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to a parquet file.
+    text_col : str
+        Name of the column containing text.
+    date_col : str
+        Name of the column containing dates.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        text_col: str = "text",
+        date_col: str = "date",
+    ):
+        self.path = Path(path)
+        self.text_col = text_col
+        self.date_col = date_col
+
+    # ------------------------------------------------------------------
+    # Time-window methods — return Subcorpus
+    # ------------------------------------------------------------------
+
+    def after(self, event: Event, *, months: int = 6) -> Subcorpus:
+        """Texts from *event.start_date* up to *months* months later."""
+        start = event.start_date
+        end = start + relativedelta(months=months)
+        return self._query(start, end)
+
+    def before(self, event: Event, *, months: int = 1) -> Subcorpus:
+        """Texts from *months* months before *event.start_date* up to the event."""
+        end = event.start_date
+        start = end - relativedelta(months=months)
+        return self._query(start, end)
+
+    def around(
+        self,
+        event: Event,
+        *,
+        months_before: int = 1,
+        months_after: int = 6,
+    ) -> Subcorpus:
+        """Texts in a window around *event.start_date*."""
+        start = event.start_date - relativedelta(months=months_before)
+        end = event.start_date + relativedelta(months=months_after)
+        return self._query(start, end)
+
+    def between(self, start: str | date, end: str | date) -> Subcorpus:
+        """Texts between two dates (inclusive)."""
+        if isinstance(start, str):
+            start = pd.Timestamp(start).date()
+        if isinstance(end, str):
+            end = pd.Timestamp(end).date()
+        return self._query(start, end)
+
+    # ------------------------------------------------------------------
+    # Info
+    # ------------------------------------------------------------------
+
+    def describe(self) -> dict:
+        """Return schema and row-count information."""
+        pf = pq.read_metadata(self.path)
+        schema = pq.read_schema(self.path)
+        return {
+            "path": str(self.path),
+            "num_rows": pf.num_rows,
+            "num_columns": schema.names.__len__(),
+            "columns": [
+                {"name": name, "type": str(schema.field(name).type)}
+                for name in schema.names
+            ],
+        }
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _query(self, start: date, end: date) -> Subcorpus:
+        con = duckdb.connect()
+        df = con.execute(
+            f"""
+            SELECT *
+            FROM read_parquet('{self.path}')
+            WHERE CAST("{self.date_col}" AS DATE)
+                  BETWEEN '{start}' AND '{end}'
+            """
+        ).fetchdf()
+        con.close()
+        return Subcorpus(df, text_col=self.text_col, date_col=self.date_col)
+
+
+class Subcorpus:
+    """A filtered slice of a corpus, supporting scoring and export."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        *,
+        text_col: str = "text",
+        date_col: str = "date",
+    ):
+        self._df = df
+        self.text_col = text_col
+        self.date_col = date_col
+
+    # ------------------------------------------------------------------
+    # Scoring
+    # ------------------------------------------------------------------
+
+    def score(
+        self,
+        terms: list[str],
+        *,
+        freq_weight: float = 1.0,
+        density_weight: float = 0.0,
+        col: str = "score",
+    ) -> Subcorpus:
+        """Add a relevance score column based on seed *terms*."""
+        self._df[col] = self._df[self.text_col].apply(
+            lambda t: combined_score(
+                str(t),
+                terms,
+                freq_weight=freq_weight,
+                density_weight=density_weight,
+            )
+        )
+        return self
+
+    def above(self, threshold: float, *, col: str = "score") -> Subcorpus:
+        """Keep only rows where *col* >= *threshold*."""
+        self._df = self._df[self._df[col] >= threshold].reset_index(drop=True)
+        return self
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Return the underlying DataFrame."""
+        return self._df
+
+    def to_parquet(self, path: str | Path) -> Path:
+        """Write to a parquet file. Returns the output path."""
+        path = Path(path)
+        table = pa.Table.from_pandas(self._df)
+        pq.write_table(table, path)
+        return path
+
+    def to_csv(self, path: str | Path) -> Path:
+        """Write to a CSV file. Returns the output path."""
+        path = Path(path)
+        self._df.to_csv(path, index=False)
+        return path
+
+    # ------------------------------------------------------------------
+    # Info
+    # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self._df)
+
+    def __repr__(self) -> str:
+        return f"Subcorpus({len(self._df)} texts)"
