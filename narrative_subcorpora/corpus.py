@@ -12,7 +12,14 @@ import pyarrow.parquet as pq
 from dateutil.relativedelta import relativedelta
 
 from .event import Event
-from .score import combined_score
+from .score import (
+    combined_score,
+    tfidf_score,
+    bm25_score,
+    build_doc_frequencies,
+    term_cluster_score,
+    weighted_term_score,
+)
 
 
 class Corpus:
@@ -145,6 +152,84 @@ class Subcorpus:
                 freq_weight=freq_weight,
                 density_weight=density_weight,
             )
+        )
+        return self
+
+    def score_tfidf(
+        self,
+        terms: list[str],
+        *,
+        col: str = "score_tfidf",
+    ) -> Subcorpus:
+        """Score texts using TF-IDF over seed *terms*.
+
+        Rewards terms that are frequent in a text but rare across the
+        subcorpus.
+        """
+        texts = self._df[self.text_col].astype(str).tolist()
+        doc_freq = build_doc_frequencies(texts, terms)
+        n_docs = len(texts)
+        self._df[col] = [
+            tfidf_score(str(t), terms, doc_freq, n_docs) for t in texts
+        ]
+        return self
+
+    def score_bm25(
+        self,
+        terms: list[str],
+        *,
+        k1: float = 1.5,
+        b: float = 0.75,
+        col: str = "score_bm25",
+    ) -> Subcorpus:
+        """Score texts using BM25 ranking over seed *terms*.
+
+        Standard search-engine relevance formula with length
+        normalisation.
+        """
+        texts = self._df[self.text_col].astype(str).tolist()
+        doc_freq = build_doc_frequencies(texts, terms)
+        n_docs = len(texts)
+        avgdl = sum(len(t.split()) for t in texts) / max(n_docs, 1)
+        self._df[col] = [
+            bm25_score(str(t), terms, doc_freq, n_docs, avgdl, k1=k1, b=b)
+            for t in texts
+        ]
+        return self
+
+    def score_cluster(
+        self,
+        terms: list[str],
+        *,
+        window: int = 50,
+        col: str = "score_cluster",
+    ) -> Subcorpus:
+        """Score texts by how tightly seed *terms* cluster together.
+
+        Slides a word-window over the text and returns the best
+        concentration of distinct seed terms found in any single window.
+        """
+        self._df[col] = self._df[self.text_col].apply(
+            lambda t: term_cluster_score(str(t), terms, window=window)
+        )
+        return self
+
+    def score_weighted(
+        self,
+        term_weights: dict[str, float],
+        *,
+        col: str = "score_weighted",
+    ) -> Subcorpus:
+        """Score texts using per-term importance weights.
+
+        Parameters
+        ----------
+        term_weights : dict[str, float]
+            Mapping from term to its weight. Give rare/specific terms a
+            higher weight than common ones.
+        """
+        self._df[col] = self._df[self.text_col].apply(
+            lambda t: weighted_term_score(str(t), term_weights)
         )
         return self
 
