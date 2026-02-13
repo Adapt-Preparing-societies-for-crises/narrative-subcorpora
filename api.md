@@ -412,6 +412,60 @@ score_distribution(scored, output="scores.png")
 Returns a `matplotlib.figure.Figure`.
 
 
+## CLI diagnostics
+
+You can also run diagnostics from the command line without writing Python.
+
+### Save a selection report to a file
+
+```bash
+nsc diagnose --corpus my_corpus.parquet --events events.json \
+    --event spaanse_griep --window 6m --min-score 0.1 \
+    --text-col ocr -o report.png
+```
+
+### Display interactively
+
+```bash
+nsc diagnose --corpus my_corpus.parquet --events events.json \
+    --event spaanse_griep --window 6m --min-score 0.1 \
+    --text-col ocr
+```
+
+If no interactive display is available (e.g. on a server), the figure is saved to `diagnose_report.png` automatically.
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--corpus` | required | Path to the parquet corpus file |
+| `--events` | required | Path to the events JSON file |
+| `--event` | required | Event label (e.g. `spaanse_griep`) |
+| `--window` | `6m` | Time window after event (e.g. `6m` for 6 months, `12m` for a year) |
+| `--min-score` | `0.0` | Minimum term-coverage score. Articles below this are counted as "excluded" |
+| `--text-col` | `text` | Name of the text column in your parquet file |
+| `--date-col` | `date` | Name of the date column |
+| `-o` | none | Output file path (`.png`, `.pdf`, `.svg`). Omit to display interactively |
+
+### Examples
+
+```bash
+# Spanish Flu, 6 months, strict threshold, save as PNG
+nsc diagnose --corpus newspapers.parquet --events events.json \
+    --event spaanse_griep --window 6m --min-score 0.15 \
+    --text-col ocr -o spaanse_griep_report.png
+
+# Bijlmerramp, 12 months, loose threshold, save as PDF
+nsc diagnose --corpus newspapers.parquet --events events.json \
+    --event bijlmer --window 12m --min-score 0.05 \
+    --text-col ocr -o bijlmer_report.pdf
+
+# No threshold — see distribution of all articles in the window
+nsc diagnose --corpus newspapers.parquet --events events.json \
+    --event cubacrisis --window 6m --text-col ocr -o cubacrisis_report.png
+```
+
+
 ## Low-level scoring functions
 
 These are the individual scoring functions used internally by `Subcorpus`. You can call them directly on individual texts if needed.

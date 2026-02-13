@@ -115,7 +115,19 @@ def extract(corpus, events_path, event_label, window, min_score, text_col, date_
 @click.option("-o", "--output", default=None, help="Save figure to file (png, pdf, svg).")
 def diagnose(corpus, events_path, event_label, window, min_score, text_col, date_col, output):
     """Visualise selection diagnostics for an event subcorpus."""
-    from .diagnostics import selection_report, score_distribution
+    import matplotlib
+    if output:
+        matplotlib.use("Agg")
+    else:
+        # Try common interactive backends, fall back to Agg + file save
+        for backend in ("TkAgg", "QtAgg", "Agg"):
+            try:
+                matplotlib.use(backend)
+                break
+            except ImportError:
+                continue
+
+    from .diagnostics import selection_report
 
     c = Corpus(corpus, text_col=text_col, date_col=date_col)
     ev = Event.from_json(events_path, event_label)
@@ -124,7 +136,16 @@ def diagnose(corpus, events_path, event_label, window, min_score, text_col, date
     sub = c.after(ev, months=months).score(terms=ev.terms)
     filtered = sub.above(min_score) if min_score > 0 else sub
 
-    selection_report(c, ev, filtered, months=months, output=output)
-    if not output:
+    if output:
+        selection_report(c, ev, filtered, months=months, output=output)
+        click.echo(f"Saved figure to {output}")
+    else:
         import matplotlib.pyplot as plt
-        plt.show()
+        selection_report(c, ev, filtered, months=months)
+        if matplotlib.get_backend().lower() == "agg":
+            # No interactive backend available, save to file instead
+            fallback = "diagnose_report.png"
+            plt.savefig(fallback, dpi=150, bbox_inches="tight")
+            click.echo(f"No interactive display available. Saved to {fallback}")
+        else:
+            plt.show()
