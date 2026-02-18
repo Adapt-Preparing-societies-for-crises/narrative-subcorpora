@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from typing import Callable
 
 
 # ── Basic scores ──────────────────────────────────────────────────────
@@ -211,3 +212,104 @@ def combined_score(
     freq = term_frequency_score(text, terms)
     density = term_density_score(text, terms)
     return (freq * freq_weight + density * density_weight) / total_weight
+
+
+# ── Grouped scoring ───────────────────────────────────────────────────
+
+def group_term_scores(
+    text: str,
+    term_groups: dict[str, list[str]],
+) -> dict[str, float]:
+    """Compute term-coverage score for each named group of seed terms.
+
+    Parameters
+    ----------
+    text : str
+        The text to score.
+    term_groups : dict[str, list[str]]
+        Mapping from group name to list of seed terms.  Typical groups
+        are ``"location"``, ``"event_type"``, and ``"impact"``.
+
+    Returns
+    -------
+    dict[str, float]
+        Per-group term-coverage scores in [0, 1].
+    """
+    return {
+        group: term_frequency_score(text, terms)
+        for group, terms in term_groups.items()
+    }
+
+
+def combine_group_scores(
+    scores: dict[str, float],
+    *,
+    weights: dict[str, float] | None = None,
+    combine: str | Callable[[dict[str, float]], float] = "geometric",
+) -> float:
+    """Combine per-group scores into a single value.
+
+    Parameters
+    ----------
+    scores : dict[str, float]
+        Per-group scores, typically from ``group_term_scores``.
+    weights : dict[str, float], optional
+        Per-group weights, used only by the ``"weighted_sum"`` strategy.
+        Groups not listed default to weight 1.0.
+    combine : str or callable
+        How to combine per-group scores:
+
+        - ``"geometric"`` *(default)* — geometric mean.  Requires
+          non-zero evidence in *every* group; a single zero collapses
+          the combined score to zero.
+        - ``"weighted_sum"`` — weighted average.  A strong group can
+          compensate for a weak one.
+        - ``"min"`` — minimum across groups.  The combined score equals
+          the weakest group; strict AND logic.
+        - ``"product"`` — product of all scores.  Like geometric but
+          without the normalising exponent; degrades faster with many
+          groups.
+
+        You can also pass any callable ``f(scores: dict[str, float]) ->
+        float`` for custom combination logic.
+
+    Returns
+    -------
+    float
+        Combined score.
+    """
+    if callable(combine):
+        return float(combine(scores))
+
+    if not scores:
+        return 0.0
+
+    values = list(scores.values())
+
+    if combine == "geometric":
+        if any(v == 0.0 for v in values):
+            return 0.0
+        return math.exp(sum(math.log(v) for v in values) / len(values))
+
+    elif combine == "weighted_sum":
+        w = weights or {}
+        total_w = sum(w.get(k, 1.0) for k in scores)
+        if total_w == 0:
+            return 0.0
+        return sum(scores[k] * w.get(k, 1.0) for k in scores) / total_w
+
+    elif combine == "min":
+        return min(values)
+
+    elif combine == "product":
+        result = 1.0
+        for v in values:
+            result *= v
+        return result
+
+    else:
+        raise ValueError(
+            f"Unknown combine strategy: {combine!r}. "
+            "Use 'geometric', 'weighted_sum', 'min', or 'product', "
+            "or pass a callable."
+        )

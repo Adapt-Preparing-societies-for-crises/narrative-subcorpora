@@ -158,3 +158,108 @@ def score_distribution(
     if output:
         fig.savefig(str(output), dpi=150, bbox_inches="tight")
     return fig
+
+
+def group_score_distribution(
+    subcorpus: Subcorpus,
+    *,
+    group_cols: list[str] | None = None,
+    combined_col: str = "score_grouped",
+    bins: int = 30,
+    threshold: float | None = None,
+    output: str | Path | None = None,
+) -> plt.Figure:
+    """Side-by-side histograms of per-group and combined scores.
+
+    Shows one histogram panel per group score column plus a final panel
+    for the combined score.  Call ``.score_grouped()`` first to ensure
+    the columns are present.
+
+    Parameters
+    ----------
+    subcorpus : Subcorpus
+        A subcorpus that has been scored with ``.score_grouped()``.
+    group_cols : list[str], optional
+        Names of the per-group score columns to display (e.g.
+        ``["score_location", "score_event_type"]``).  If *None*, all
+        columns whose name starts with ``"score_"`` and ends with one of
+        the group names inferred from the DataFrame are shown.  In
+        practice it is clearer to pass them explicitly.
+    combined_col : str
+        Name of the combined score column (default ``"score_grouped"``).
+    bins : int
+        Number of histogram bins per panel.
+    threshold : float, optional
+        If given, draw a vertical threshold line on the combined-score
+        panel.
+    output : str or Path, optional
+        If given, save the figure to this path.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    ::
+
+        sub = corpus.after(event, months=6).score_grouped(event.term_groups)
+        group_score_distribution(
+            sub,
+            group_cols=["score_location", "score_event_type", "score_impact"],
+            threshold=0.05,
+        )
+    """
+    df = subcorpus.to_dataframe()
+
+    # Determine which columns to show
+    if group_cols is None:
+        # Auto-detect: any score_ column that isn't a known "global" score
+        known_global = {"score", "score_tfidf", "score_bm25", "score_cluster",
+                        "score_weighted", "score_grouped", "score_outlier",
+                        "score_similarity"}
+        group_cols = [
+            c for c in df.columns
+            if c.startswith("score_") and c not in known_global
+        ]
+
+    panels = group_cols + ([combined_col] if combined_col in df.columns else [])
+
+    if not panels:
+        raise ValueError(
+            "No score columns found to plot. Pass group_cols explicitly or "
+            "call .score_grouped() first."
+        )
+
+    n = len(panels)
+    fig, axes = plt.subplots(1, n, figsize=(4 * n, 4), sharey=False)
+    if n == 1:
+        axes = [axes]
+
+    palette = ["#2563eb"] * (n - 1) + ["#16a34a"]  # blue for groups, green for combined
+
+    for ax, col, color in zip(axes, panels, palette):
+        if col not in df.columns:
+            ax.set_visible(False)
+            continue
+        ax.hist(df[col], bins=bins, color=color, edgecolor="white", linewidth=0.5)
+        if threshold is not None and col == combined_col:
+            ax.axvline(
+                threshold, color="#dc2626", linestyle="--", linewidth=1.5,
+                label=f"threshold={threshold}",
+            )
+            ax.legend(fontsize=8)
+        label = col.replace("score_", "").replace("_", " ").title()
+        if col == combined_col:
+            label = f"{label} (combined)"
+        ax.set_title(label)
+        ax.set_xlabel("Score")
+        ax.set_ylabel("Articles")
+
+    fig.suptitle("Score distributions by group", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+
+    if output:
+        fig.savefig(str(output), dpi=150, bbox_inches="tight")
+
+    return fig

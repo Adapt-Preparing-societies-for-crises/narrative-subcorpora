@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +18,7 @@ class Event:
     full_name: str
     start_date: date
     terms: list[str]
+    term_groups: dict[str, list[str]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Constructors
@@ -48,12 +49,15 @@ class Event:
     @classmethod
     def _from_dict(cls, d: dict) -> Event:
         start = parse_date(d["start_date"], dayfirst=True).date()
+        raw_groups = d.get("term_groups", {})
         return cls(
             label=d["label"],
             full_name=d.get("full name", d["label"]),
             start_date=start,
             terms=list(d.get("terms", [])),
+            term_groups={k: list(v) for k, v in raw_groups.items()},
         )
 
     def __str__(self) -> str:
-        return f"{self.full_name} ({self.start_date}, {len(self.terms)} terms)"
+        groups_info = f", {len(self.term_groups)} groups" if self.term_groups else ""
+        return f"{self.full_name} ({self.start_date}, {len(self.terms)} terms{groups_info})"

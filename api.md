@@ -4,7 +4,7 @@ This document covers every class and function available in the `narrative_subcor
 
 ```python
 from narrative_subcorpora import Corpus, Subcorpus, Event, ingest
-from narrative_subcorpora import selection_report, score_distribution
+from narrative_subcorpora import selection_report, score_distribution, group_score_distribution
 ```
 
 
@@ -17,13 +17,14 @@ An event is a historical occurrence with a date and a list of seed terms. Events
 ```python
 from narrative_subcorpora import Event
 
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
-print(event.label)       # "spaanse_griep"
-print(event.full_name)   # "Spaanse Griep"
-print(event.start_date)  # datetime.date(1918, 7, 1)
-print(event.terms)       # ["spaans", "spaanse", "griep", ...]
-print(len(event.terms))  # number of seed terms
+print(event.label)        # "watersnood"
+print(event.full_name)    # "Watersnoodramp 1953"
+print(event.start_date)   # datetime.date(1953, 2, 1)
+print(event.terms)        # ["watersnoodramp", "watersnood", ...]
+print(event.term_groups)  # {"location": [...], "event_type": [...], ...}
+print(len(event.terms))   # number of seed terms
 ```
 
 ### Load all events
@@ -32,17 +33,39 @@ print(len(event.terms))  # number of seed terms
 events = Event.load_all("events.json")
 
 for ev in events:
-    print(ev.label, ev.full_name, ev.start_date)
+    print(ev.label, ev.full_name, ev.start_date, list(ev.term_groups))
 ```
 
 ### Properties
 
 | Property | Type | Description |
 |---|---|---|
-| `label` | `str` | Short identifier, e.g. `"spaanse_griep"` |
-| `full_name` | `str` | Human-readable name, e.g. `"Spaanse Griep"` |
+| `label` | `str` | Short identifier, e.g. `"watersnood"` |
+| `full_name` | `str` | Human-readable name, e.g. `"Watersnoodramp 1953"` |
 | `start_date` | `datetime.date` | Start date of the event |
-| `terms` | `list[str]` | Seed terms associated with the event |
+| `terms` | `list[str]` | Flat list of all seed terms (for backward-compatible scoring) |
+| `term_groups` | `dict[str, list[str]]` | Named groups of seed terms for grouped scoring. Empty dict if not defined. |
+
+### JSON format
+
+A minimal event entry with term groups:
+
+```json
+{
+  "label": "watersnood",
+  "full name": "Watersnoodramp 1953",
+  "start_date": "01-02-1953",
+  "terms": ["zeeland", "overstroming", "dijkbreuk", "slachtoffers", ...],
+  "term_groups": {
+    "location":   ["zeeland", "walcheren", "tholen", "beveland"],
+    "event_type": ["overstroming", "dijkbreuk", "stormvloed", "watersnood"],
+    "cause":      ["springtij", "noordwesterstorm", "springvloed"],
+    "impact":     ["slachtoffers", "doden", "evacuatie", "noodhulp"]
+  }
+}
+```
+
+The `terms` field is still required for backward compatibility. `term_groups` is optional; events without it still work with all scoring methods except `score_grouped`.
 
 
 ## Ingest
@@ -131,7 +154,7 @@ sub = corpus.around(event, months_before=2, months_after=12)
 Select texts between two dates. Accepts date strings or `datetime.date` objects.
 
 ```python
-sub = corpus.between("1918-01-01", "1919-12-31")
+sub = corpus.between("1953-01-01", "1953-12-31")
 ```
 
 ### Describe a corpus
@@ -261,6 +284,65 @@ sub = corpus.after(event, months=6).score_weighted(weights)
 | `term_weights` | `dict[str, float]` | required | Term-to-weight mapping |
 | `col` | `str` | `"score_weighted"` | Name of the output column |
 
+#### `.score_grouped(term_groups, weights=None, combine="geometric", col="score_grouped")`
+
+Score texts using named term groups combined into a single score. This is the smartest filtering approach when you have terms of different semantic types (e.g. location names, event type words, impact words).
+
+For each group, a term-coverage score (0 to 1) is computed independently. Per-group scores are written to columns named `score_{group_name}`. The groups are then combined into a single score using the chosen strategy.
+
+```python
+# Using groups from the event definition
+event = Event.from_json("events.json", "watersnood")
+sub = (
+    corpus
+    .after(event, months=6)
+    .score_grouped(event.term_groups)   # writes score_location, score_event_type, ...
+    .above(0.0, col="score_grouped")    # keep only texts with evidence in every group
+)
+
+# Inline group definition
+groups = {
+    "location":   ["zeeland", "walcheren", "tholen"],
+    "event_type": ["overstroming", "dijkbreuk", "stormvloed"],
+}
+sub = corpus.after(event, months=6).score_grouped(groups)
+
+# Custom weights with weighted_sum strategy
+sub = corpus.after(event, months=6).score_grouped(
+    event.term_groups,
+    weights={"location": 1.0, "event_type": 2.0, "impact": 1.5},
+    combine="weighted_sum",
+)
+
+# Custom combination function
+sub = corpus.after(event, months=6).score_grouped(
+    event.term_groups,
+    combine=lambda scores: scores.get("location", 0) * scores.get("event_type", 0),
+)
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `term_groups` | `dict[str, list[str]]` | required | Named groups of seed terms |
+| `weights` | `dict[str, float]` or `None` | `None` | Per-group weights for `"weighted_sum"` strategy |
+| `combine` | `str` or callable | `"geometric"` | Combination strategy (see table below) |
+| `col` | `str` | `"score_grouped"` | Name of the combined output column |
+
+**Combination strategies:**
+
+| Strategy | Formula | Semantics |
+|---|---|---|
+| `"geometric"` *(default)* | geometric mean | Requires evidence in every group; zero in any group → zero combined |
+| `"weighted_sum"` | weighted average | Strong groups compensate for weak ones |
+| `"min"` | minimum across groups | Combined score equals the weakest group |
+| `"product"` | product of all scores | Harsher than geometric; degrades quickly with many groups |
+| callable | `f(dict) -> float` | Fully custom logic |
+
+**Output columns written:**
+
+- `score_{group_name}` for each group in `term_groups`
+- `score_grouped` (or the value of `col`) for the combined score
+
 ### Combining multiple scores
 
 You can chain multiple scoring methods. Each adds its own column.
@@ -273,11 +355,11 @@ sub = (
     .score_tfidf(terms=event.terms)               # -> "score_tfidf"
     .score_bm25(terms=event.terms)                # -> "score_bm25"
     .score_cluster(terms=event.terms, window=30)  # -> "score_cluster"
-    .score_weighted(my_weights)                   # -> "score_weighted"
+    .score_grouped(event.term_groups)             # -> "score_grouped", "score_location", ...
 )
 
 df = sub.to_dataframe()
-# df now has all original columns + all five score columns
+# df now has all original columns + all score columns
 ```
 
 ### Filtering
@@ -290,8 +372,11 @@ Keep only rows where a score column is at or above a threshold.
 # Filter on the default "score" column
 sub = sub.above(0.1)
 
-# Filter on a specific score column
-sub = sub.above(5.0, col="score_bm25")
+# Filter on the grouped score
+sub = sub.above(0.05, col="score_grouped")
+
+# Filter on a specific group
+sub = sub.above(0.0, col="score_location")  # must mention at least one location term
 ```
 
 | Parameter | Type | Default | Description |
@@ -331,7 +416,7 @@ sub = corpus.after(event, months=6).embed("all-MiniLM-L6-v2")
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `model` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformers model name. Any model from [HuggingFace](https://huggingface.co/models?library=sentence-transformers) works |
+| `model` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformers model name |
 | `batch_size` | `int` | `64` | Batch size for encoding |
 | `show_progress` | `bool` | `True` | Show a progress bar |
 
@@ -374,9 +459,6 @@ Values range from -1 to 1, where 1 means the text is semantically very similar t
 
 ```python
 sub = sub.score_similarity(terms=event.terms)
-
-# Use a subset of seed terms for a more focused signal
-sub = sub.score_similarity(terms=event.terms[:10], col="score_sim_core")
 ```
 
 | Parameter | Type | Default | Description |
@@ -385,30 +467,6 @@ sub = sub.score_similarity(terms=event.terms[:10], col="score_sim_core")
 | `model` | `str` or `None` | `None` | Model for embedding the terms. If `None`, reuses the model from `.embed()` |
 | `batch_size` | `int` | `64` | Batch size for encoding terms |
 | `col` | `str` | `"score_similarity"` | Name of the output column |
-
-#### Full embedding workflow
-
-```python
-from narrative_subcorpora import Corpus, Event
-
-corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
-
-sub = (
-    corpus
-    .after(event, months=6)
-    .score(terms=event.terms)                     # keyword score
-    .embed("paraphrase-multilingual-MiniLM-L12-v2")  # compute embeddings
-    .score_outlier(method="centroid")              # outlier score
-    .score_outlier(method="knn", k=5, col="score_outlier_knn")
-    .score_similarity(terms=event.terms)           # semantic similarity
-    .above(0.05, col="score")                      # keep keyword-relevant texts
-    .below(0.5, col="score_outlier")               # remove outliers
-)
-
-df = sub.to_dataframe()
-# df has: date, ocr, [metadata...], score, score_outlier, score_outlier_knn, score_similarity
-```
 
 ### Export
 
@@ -448,7 +506,7 @@ print(sub)  # "Subcorpus(1234 texts)"
 
 ## Diagnostics
 
-Two visualisation functions for inspecting your subcorpus selection.
+Three visualisation functions for inspecting your subcorpus selection.
 
 ### Selection report
 
@@ -460,7 +518,7 @@ Produces a two-panel figure:
 from narrative_subcorpora import Corpus, Event, selection_report
 
 corpus = Corpus("my_corpus.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 subcorpus = (
     corpus
@@ -495,7 +553,7 @@ Histogram of all score values with an optional threshold line.
 from narrative_subcorpora import Corpus, Event, score_distribution
 
 corpus = Corpus("my_corpus.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 scored = corpus.after(event, months=6).score(terms=event.terms)
 
@@ -518,6 +576,40 @@ score_distribution(scored, output="scores.png")
 | `score_col` | `str` | `"score"` | Which score column to plot |
 | `bins` | `int` | `40` | Number of histogram bins |
 | `threshold` | `float` or `None` | `None` | Draw a vertical line at this value |
+| `output` | `str`, `Path`, or `None` | `None` | Save path. `None` = don't save |
+
+Returns a `matplotlib.figure.Figure`.
+
+### Group score distribution *(new)*
+
+Side-by-side histograms of per-group scores and the combined score. Call `.score_grouped()` first.
+
+```python
+from narrative_subcorpora import Corpus, Event, group_score_distribution
+
+corpus = Corpus("my_corpus.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "watersnood")
+
+scored = corpus.after(event, months=6).score_grouped(event.term_groups)
+
+fig = group_score_distribution(
+    scored,
+    group_cols=["score_location", "score_event_type", "score_cause", "score_impact"],
+    threshold=0.05,
+)
+fig.show()
+
+# Auto-detect group columns (finds all score_ columns not in the known global list)
+fig = group_score_distribution(scored)
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `subcorpus` | `Subcorpus` | required | A subcorpus scored with `.score_grouped()` |
+| `group_cols` | `list[str]` or `None` | `None` | Per-group column names to show. Auto-detected if `None`. |
+| `combined_col` | `str` | `"score_grouped"` | Name of the combined score column |
+| `bins` | `int` | `30` | Number of histogram bins per panel |
+| `threshold` | `float` or `None` | `None` | Threshold line on the combined-score panel |
 | `output` | `str`, `Path`, or `None` | `None` | Save path. `None` = don't save |
 
 Returns a `matplotlib.figure.Figure`.
@@ -553,28 +645,10 @@ If no interactive display is available (e.g. on a server), the figure is saved t
 | `--events` | required | Path to the events JSON file |
 | `--event` | required | Event label (e.g. `spaanse_griep`) |
 | `--window` | `6m` | Time window after event (e.g. `6m` for 6 months, `12m` for a year) |
-| `--min-score` | `0.0` | Minimum term-coverage score. Articles below this are counted as "excluded" |
+| `--min-score` | `0.0` | Minimum score. Articles below this are counted as "excluded" |
 | `--text-col` | `text` | Name of the text column in your parquet file |
 | `--date-col` | `date` | Name of the date column |
 | `-o` | none | Output file path (`.png`, `.pdf`, `.svg`). Omit to display interactively |
-
-### Examples
-
-```bash
-# Spanish Flu, 6 months, strict threshold, save as PNG
-nsc diagnose --corpus newspapers.parquet --events events.json \
-    --event spaanse_griep --window 6m --min-score 0.15 \
-    --text-col ocr -o spaanse_griep_report.png
-
-# Bijlmerramp, 12 months, loose threshold, save as PDF
-nsc diagnose --corpus newspapers.parquet --events events.json \
-    --event bijlmer --window 12m --min-score 0.05 \
-    --text-col ocr -o bijlmer_report.pdf
-
-# No threshold — see distribution of all articles in the window
-nsc diagnose --corpus newspapers.parquet --events events.json \
-    --event cubacrisis --window 6m --text-col ocr -o cubacrisis_report.png
-```
 
 
 ## Low-level scoring functions
@@ -591,6 +665,8 @@ from narrative_subcorpora.score import (
     build_doc_frequencies,
     term_cluster_score,
     weighted_term_score,
+    group_term_scores,
+    combine_group_scores,
 )
 ```
 
@@ -636,15 +712,6 @@ Count how many documents each term appears in. Returns a `dict[str, int]`. Use t
 
 BM25 score for a single text. Requires pre-computed document frequencies and average document length.
 
-```python
-texts = ["De griep epidemie was hevig", "Het weer is mooi", "Koorts en griep"]
-terms = ["griep", "epidemie", "koorts"]
-doc_freq = build_doc_frequencies(texts, terms)
-avgdl = sum(len(t.split()) for t in texts) / len(texts)
-
-bm25_score(texts[0], terms, doc_freq, len(texts), avgdl)
-```
-
 ### `term_cluster_score(text, terms, window=50)`
 
 Maximum concentration of distinct seed terms in any single word-window. Returns 0 to 1.
@@ -652,6 +719,53 @@ Maximum concentration of distinct seed terms in any single word-window. Returns 
 ### `weighted_term_score(text, term_weights)`
 
 Weighted coverage score. `term_weights` is a `dict[str, float]` mapping terms to importance weights.
+
+### `group_term_scores(text, term_groups)` *(new)*
+
+Compute term-coverage scores for each named group independently.
+
+```python
+text = "De watersnood in Zeeland was een nationale ramp. Dijkbreuk bij Walcheren."
+groups = {
+    "location":   ["zeeland", "walcheren", "tholen"],
+    "event_type": ["watersnood", "dijkbreuk", "overstroming"],
+}
+scores = group_term_scores(text, groups)
+# {"location": 0.667, "event_type": 0.667}
+```
+
+Returns `dict[str, float]` with one entry per group.
+
+### `combine_group_scores(scores, weights=None, combine="geometric")` *(new)*
+
+Combine a dict of per-group scores into a single value.
+
+```python
+from narrative_subcorpora.score import combine_group_scores
+
+scores = {"location": 0.5, "event_type": 0.8, "impact": 0.2}
+
+combine_group_scores(scores)                          # geometric: ~0.415
+combine_group_scores(scores, combine="weighted_sum")  # equal-weight mean: 0.5
+combine_group_scores(scores, combine="min")           # 0.2
+combine_group_scores(scores, combine="product")       # 0.08
+
+# Custom weights with weighted_sum
+combine_group_scores(
+    scores,
+    weights={"location": 1.0, "event_type": 2.0, "impact": 1.5},
+    combine="weighted_sum",
+)  # ~0.578
+
+# Custom function
+combine_group_scores(scores, combine=lambda s: s["location"] * s["event_type"])
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `scores` | `dict[str, float]` | required | Per-group scores |
+| `weights` | `dict[str, float]` or `None` | `None` | Per-group weights (used only by `"weighted_sum"`) |
+| `combine` | `str` or callable | `"geometric"` | Combination strategy |
 
 
 ## Low-level embedding functions
@@ -672,58 +786,21 @@ from narrative_subcorpora.embed import (
 
 Encode a list of texts into an embedding matrix. Returns a numpy array of shape `(n, embedding_dim)`.
 
-```python
-import numpy as np
-from narrative_subcorpora.embed import embed_texts
-
-texts = ["De griep breekt uit", "Het weer is mooi"]
-embeddings = embed_texts(texts, "all-MiniLM-L6-v2", show_progress=False)
-print(embeddings.shape)  # (2, 384)
-```
-
 ### `centroid_distance_scores(embeddings)`
 
-Cosine distance from each embedding to the centroid. Returns values in [0, 2] where 0 = identical to centroid.
-
-```python
-from narrative_subcorpora.embed import centroid_distance_scores
-
-scores = centroid_distance_scores(embeddings)
-```
+Cosine distance from each embedding to the centroid. Returns values in [0, 2].
 
 ### `knn_distance_scores(embeddings, k=5)`
 
 Average cosine distance to the *k* nearest neighbours. Returns values in [0, 2].
 
-```python
-from narrative_subcorpora.embed import knn_distance_scores
-
-scores = knn_distance_scores(embeddings, k=3)
-```
-
 ### `seed_similarity_scores(embeddings, seed_embedding)`
 
-Cosine similarity between each text embedding and a seed embedding (or averaged seed embeddings). Returns values in [-1, 1].
-
-```python
-from narrative_subcorpora.embed import embed_texts, seed_similarity_scores
-
-text_embs = embed_texts(texts, "all-MiniLM-L6-v2", show_progress=False)
-seed_embs = embed_texts(["griep", "epidemie"], "all-MiniLM-L6-v2", show_progress=False)
-scores = seed_similarity_scores(text_embs, seed_embs)
-```
+Cosine similarity between each text embedding and a seed embedding. Returns values in [-1, 1].
 
 ### `outlier_scores(texts, model, method="centroid", k=5, ...)`
 
-Convenience function: embed texts and compute outlier scores in one call. Returns `(embeddings, scores)`.
-
-```python
-from narrative_subcorpora.embed import outlier_scores
-
-embeddings, scores = outlier_scores(
-    texts, "all-MiniLM-L6-v2", method="knn", k=5, show_progress=False
-)
-```
+Convenience function: embed texts and compute outlier scores in one call.
 
 
 ## Complete examples
@@ -734,7 +811,7 @@ embeddings, scores = outlier_scores(
 from narrative_subcorpora import Corpus, Event
 
 corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 subcorpus = (
     corpus
@@ -743,8 +820,51 @@ subcorpus = (
     .above(0.1)
 )
 
-subcorpus.to_csv("spaanse_griep_subcorpus.csv")
+subcorpus.to_csv("watersnood_subcorpus.csv")
 print(f"Exported {len(subcorpus)} articles")
+```
+
+### Grouped scoring workflow
+
+```python
+from narrative_subcorpora import Corpus, Event
+
+corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "watersnood")
+
+subcorpus = (
+    corpus
+    .after(event, months=6)
+    .score_grouped(event.term_groups)       # score per group + combined
+    .above(0.0, col="score_grouped")        # keep texts with evidence in all groups
+)
+
+df = subcorpus.to_dataframe()
+score_cols = [c for c in df.columns if c.startswith("score_")]
+print(df[score_cols].describe())
+```
+
+### Compare combination strategies
+
+```python
+from narrative_subcorpora import Corpus, Event
+
+corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
+event = Event.from_json("events.json", "watersnood")
+
+window = corpus.after(event, months=6)
+
+# Compute grouped scores under four different strategies
+for strategy in ["geometric", "weighted_sum", "min", "product"]:
+    sub = window.score_grouped(
+        event.term_groups,
+        combine=strategy,
+        col=f"score_{strategy}",
+    )
+
+df = sub.to_dataframe()
+strategy_cols = [f"score_{s}" for s in ["geometric", "weighted_sum", "min", "product"]]
+print(df[strategy_cols].describe())
 ```
 
 ### Compare scoring methods
@@ -753,7 +873,7 @@ print(f"Exported {len(subcorpus)} articles")
 from narrative_subcorpora import Corpus, Event
 
 corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 sub = (
     corpus
@@ -762,31 +882,42 @@ sub = (
     .score_tfidf(terms=event.terms)
     .score_bm25(terms=event.terms)
     .score_cluster(terms=event.terms)
+    .score_grouped(event.term_groups)
 )
 
 df = sub.to_dataframe()
-score_cols = ["score", "score_tfidf", "score_bm25", "score_cluster"]
+score_cols = ["score", "score_tfidf", "score_bm25", "score_cluster", "score_grouped"]
 print(df[score_cols].describe())
 ```
 
 ### Diagnostics workflow
 
 ```python
-from narrative_subcorpora import Corpus, Event, selection_report, score_distribution
+from narrative_subcorpora import (
+    Corpus, Event, selection_report,
+    score_distribution, group_score_distribution,
+)
 
 corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 # Score without filtering first
-scored = corpus.after(event, months=6).score(terms=event.terms)
+scored = corpus.after(event, months=6).score_grouped(event.term_groups)
 
-# Look at the score distribution to choose a threshold
-score_distribution(scored, threshold=0.1, output="score_dist.png")
+# Per-group score distributions — see which group is the binding constraint
+group_score_distribution(
+    scored,
+    group_cols=["score_location", "score_event_type", "score_cause", "score_impact"],
+    threshold=0.05,
+    output="group_distributions.png",
+)
 
-# Apply the threshold
-filtered = scored.above(0.1)
+# Standard distribution of the combined score
+score_distribution(scored, score_col="score_grouped", threshold=0.05,
+                   output="combined_dist.png")
 
-# See how many articles were kept per day
+# Apply threshold and inspect temporal selection
+filtered = scored.above(0.05, col="score_grouped")
 selection_report(corpus, event, filtered, months=6, output="selection.png")
 
 print(f"Kept {len(filtered)} of {len(scored)} articles")
@@ -801,12 +932,20 @@ corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
 events = Event.load_all("events.json")
 
 for event in events:
-    sub = (
-        corpus
-        .after(event, months=6)
-        .score(terms=event.terms)
-        .above(0.1)
-    )
+    if event.term_groups:
+        sub = (
+            corpus
+            .after(event, months=6)
+            .score_grouped(event.term_groups)
+            .above(0.0, col="score_grouped")
+        )
+    else:
+        sub = (
+            corpus
+            .after(event, months=6)
+            .score(terms=event.terms)
+            .above(0.1)
+        )
     sub.to_parquet(f"{event.label}_subcorpus.parquet")
     print(f"{event.label}: {len(sub)} articles")
 ```
@@ -819,45 +958,216 @@ Use embeddings to find and remove articles that passed keyword filtering but are
 from narrative_subcorpora import Corpus, Event
 
 corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 sub = (
     corpus
     .after(event, months=6)
-    .score(terms=event.terms)
-    .above(0.05)                                      # loose keyword filter first
-    .embed("paraphrase-multilingual-MiniLM-L12-v2")   # compute embeddings
-    .score_outlier(method="centroid")                  # flag outliers
-    .below(0.5, col="score_outlier")                   # remove outliers
+    .score_grouped(event.term_groups)             # grouped keyword filter
+    .above(0.0, col="score_grouped")              # must have evidence in every group
+    .embed("paraphrase-multilingual-MiniLM-L12-v2")
+    .score_outlier(method="centroid")
+    .below(0.5, col="score_outlier")              # remove semantic outliers
 )
 
 sub.to_csv("clean_subcorpus.csv")
-print(f"Kept {len(sub)} articles after outlier removal")
+print(f"Kept {len(sub)} articles after grouped + outlier filtering")
 ```
 
 ### Combine keyword and semantic scoring
-
-Use keyword scores for initial filtering, then rank by semantic similarity to the seed terms.
 
 ```python
 from narrative_subcorpora import Corpus, Event
 
 corpus = Corpus("newspapers.parquet", text_col="ocr", date_col="date")
-event = Event.from_json("events.json", "spaanse_griep")
+event = Event.from_json("events.json", "watersnood")
 
 sub = (
     corpus
     .after(event, months=6)
-    .score(terms=event.terms)                         # keyword coverage
-    .above(0.03)                                      # keep anything mentioning a few terms
+    .score_grouped(event.term_groups)             # grouped keyword coverage
+    .above(0.0, col="score_grouped")              # loose grouped filter first
     .embed("paraphrase-multilingual-MiniLM-L12-v2")
-    .score_similarity(terms=event.terms)              # semantic similarity to seed terms
-    .score_outlier()                                  # outlier detection
+    .score_similarity(terms=event.terms)          # semantic similarity to seed terms
+    .score_outlier()                              # outlier detection
 )
 
 df = sub.to_dataframe()
 
 # Sort by semantic similarity — most relevant first
 df = df.sort_values("score_similarity", ascending=False)
-print(df[["date", "score", "score_similarity", "score_outlier"]].head(20))
+print(df[["date", "score_grouped", "score_similarity", "score_outlier"]].head(20))
+```
+
+
+---
+
+## ActiveLearner
+
+`ActiveLearner` wraps a `Subcorpus` and iteratively refines document selection by asking the researcher to label a small batch of documents as *relevant* or *not relevant*. A logistic regression classifier is retrained on those labels and used to rank remaining documents by uncertainty, so each annotation round gives the most information per label.
+
+Requires the `active-learning` optional extras:
+
+```
+pip install narrative-subcorpora[active-learning]
+```
+
+### Import
+
+```python
+from narrative_subcorpora import ActiveLearner
+```
+
+### Constructor
+
+```python
+ActiveLearner(
+    subcorpus,
+    *,
+    features="scores",      # "scores" | "tfidf" | "embeddings"
+    seed_terms=None,        # restrict tfidf vocabulary to these terms
+    cold_start_col=None,    # column to use for cold-start ranking
+    score_col="score_al",   # output column name
+    random_state=42,
+)
+```
+
+| Parameter | Description |
+|---|---|
+| `subcorpus` | A `Subcorpus` object (the candidate pool) |
+| `features` | How to build the feature matrix (see below) |
+| `seed_terms` | If `features="tfidf"`, restrict vocabulary to these terms |
+| `cold_start_col` | Score column to use for initial ranking (auto-detected if None) |
+| `score_col` | Name of the output column written by `to_subcorpus()` |
+| `random_state` | Random seed for reproducibility |
+
+### Feature modes
+
+| `features=` | Description |
+|---|---|
+| `"scores"` *(default)* | Uses existing score columns on the subcorpus. Fast; requires no extra computation. |
+| `"tfidf"` | Builds a TF-IDF matrix over the raw text. Slower; works without pre-computed scores. |
+| `"embeddings"` | Uses the embedding matrix stored by `.embed()`. Highest quality; call `.embed()` first. |
+
+### Methods
+
+#### `.label(idx, relevant)` → `ActiveLearner`
+
+Label a single document.
+
+```python
+al.label(0, True)   # row 0 is relevant
+al.label(7, False)  # row 7 is not relevant
+```
+
+#### `.label_batch(labels)` → `ActiveLearner`
+
+Label multiple documents at once.
+
+```python
+al.label_batch({0: True, 1: False, 3: True, 5: False})
+```
+
+#### `.retrain()` → `ActiveLearner`
+
+Fit the logistic regression classifier on current labels and update all document scores.
+Requires at least one positive and one negative label.
+
+```python
+al.retrain()
+```
+
+#### `.next_batch(n=10)` → `list[int]`
+
+Return the indices of the next *n* documents to label.
+
+- **Cold start** (before training): returns top-scored + random mix.
+- **After training**: returns the documents with the highest uncertainty (closest to 0.5 probability).
+
+```python
+batch = al.next_batch(n=5)
+for idx in batch:
+    print(idx, al._df.at[idx, "ocr"][:200])
+```
+
+#### `.annotate(n=10, *, auto_retrain=True)` → `None`
+
+Interactive annotation session. Shows ipywidgets cards in Jupyter (Relevant / Not relevant / Skip / Stop buttons); falls back to `input()` prompts in a terminal.
+
+```python
+al.annotate(n=10)          # label 10 documents interactively
+al.annotate(n=20)          # continue with 20 more
+```
+
+When `auto_retrain=True` (the default), the classifier is retrained automatically after each batch, provided there is at least one label of each class.
+
+#### `.status()` → `None`
+
+Print a summary of labelling progress, rank stability (Spearman correlation between previous and current scores), and cross-validated F1.
+
+```python
+al.status()
+# Labelled: 20 / 4352  (+12 relevant, -8 irrelevant)
+# Rank stability (Spearman vs previous fit): 0.912
+# CV F1 (k=3): 0.731 ± 0.045
+```
+
+#### `.to_subcorpus()` → `Subcorpus`
+
+Return a `Subcorpus` with a `score_al` column containing classifier probabilities (or cold-start scores if the classifier has not been trained).
+
+```python
+result = al.to_subcorpus()
+result.to_csv("al_ranked.csv")
+```
+
+### Complete example
+
+```python
+from narrative_subcorpora import Corpus, Event, ActiveLearner
+
+corpus = Corpus("news.parquet", text_col="ocr", date_col="date")
+event  = Event.from_json("events.json", "watersnood")
+
+# Build candidate pool
+sub = (
+    corpus
+    .after(event, months=6)
+    .score(terms=event.terms)
+    .score_grouped(event.term_groups)
+)
+
+# Create learner using existing score columns as features
+al = ActiveLearner(sub, features="scores")
+
+# Interactive annotation (ipywidgets in Jupyter, text in terminal)
+al.annotate(n=15)
+
+# Check model quality
+al.status()
+
+# Export with al scores — sort by score_al descending
+result = al.to_subcorpus()
+df = result.to_dataframe().sort_values("score_al", ascending=False)
+df.to_csv("al_subcorpus.csv", index=False)
+```
+
+### Simulated labelling (scripting / testing)
+
+```python
+al = ActiveLearner(sub, features="scores")
+
+# Simulate two rounds of labelling + retraining
+batch1 = al.next_batch(n=10)
+labels1 = {idx: True if al._df.at[idx, "score"] > 0.2 else False
+           for idx in batch1}
+al.label_batch(labels1).retrain()
+
+batch2 = al.next_batch(n=10)
+labels2 = {idx: True if al._df.at[idx, "score_grouped"] > 0.1 else False
+           for idx in batch2}
+al.label_batch(labels2).retrain()
+
+al.status()
+result = al.to_subcorpus()
 ```

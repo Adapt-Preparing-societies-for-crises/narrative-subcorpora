@@ -27,7 +27,21 @@
         "verplegster","verpleglster","verplegfter",
         "soldaren","soldatem","soldatcn","soldarn",
         "militair","militairn","militarn","mllitair"
-    ]
+    ],
+    "term_groups": {
+        "location": [
+            "spanje","spaans","spaanse","spaansch","spaansche","spain","spanish"
+        ],
+        "event_type": [
+            "griep","influenza","flu","epidemie","pandemie","uitbraak","besmetting","infectie"
+        ],
+        "symptoms": [
+            "koorts","pneumonie","longontsteking","hoest","benauwd","ademhaling","ziekte","ziek"
+        ],
+        "response": [
+            "quarantaine","isolatie","ziekenhuis","hospitaal","arts","dokter","verpleegster","kliniek"
+        ]
+    }
   },
   {
     "label": "zeven_prov",
@@ -53,7 +67,21 @@
         "batavla","batavia.","bataria",
         "soerabaia","soerabaja.","soerabasa",
         "bommcn","bornen","bormcn","bomen"
-    ]
+    ],
+    "term_groups": {
+        "location": [
+            "indie","indië","nedindie","nederlandsindie","sumatra","atjeh","soerabaja","java","batavia","kolonie"
+        ],
+        "vessel": [
+            "zeven","provincien","provinciën","schip","pantserkruiser","kruiser","oorlogsschip","bemanning"
+        ],
+        "event_type": [
+            "muiterij","muiters","opstand","oproer","rebellie","staking","onrust","revolutie"
+        ],
+        "actors": [
+            "matroos","marinier","marine","knil","soldaat","officier","commandant","kapitein","gouverneur"
+        ]
+    }
   },
   {
     "label": "cubacrisis",
@@ -78,7 +106,21 @@
         "kennedy.","kenncdy","kenneoy",
         "castro.","caslro","castm",
         "blokkadc","blokkacle","blokkade."
-    ]
+    ],
+    "term_groups": {
+        "location": [
+            "cuba","havanna","havana","moskou","washington"
+        ],
+        "event_type": [
+            "crisis","cubacrisis","blokkade","zeeblokkade","ultimatum","dreiging","confrontatie"
+        ],
+        "weapons": [
+            "missile","raket","raketten","kernwapen","atoom","nucleair","kernkop","kernoorlog"
+        ],
+        "actors": [
+            "castro","kennedy","chroesjtsjov","khrushchev","sovjet","ussr","vs","amerika","verenigde"
+        ]
+    }
   },
   {
     "label": "kaping",
@@ -100,7 +142,21 @@
         "treln","lrein","trei n","trelm",
         "lreraan","heerling","leerling.",
         "rnarlniers","marlnlers","marlnicrs"
-    ]
+    ],
+    "term_groups": {
+        "location": [
+            "punt","bovensmilde","drenthe","woonorden"
+        ],
+        "vehicle": [
+            "trein","sprinter","intercity"
+        ],
+        "event_type": [
+            "treinkaping","kaping","gijzeling","bestorming","bevrijding","aanval","ultimatum"
+        ],
+        "actors": [
+            "moluks","molukkers","rms","ambon","ambonees","molukken","mariniers","bvd","politie","commando"
+        ]
+    }
   },
   {
     "label": "bijlmer",
@@ -121,46 +177,117 @@
         "boelng","boeing.","boe1ng",
         "vllegtulg","vlieytuig","vligtuig",
         "necrgestort","neergcstort","neergestorl"
-    ]
+    ],
+    "term_groups": {
+        "location": [
+            "bijlmer","bijlmermeer","zuidoost","groeneveen","kleiburg","amsterdam","schiphol"
+        ],
+        "aircraft": [
+            "boeing","747","vliegtuig","toestel","elal","motor","romp"
+        ],
+        "event_type": [
+            "crash","ramp","vliegramp","neergestort","explosie","brand","instorting","ongeval"
+        ],
+        "impact": [
+            "slachtoffers","doden","gewonden","uranium","gif","brandweer","ambulance","hulpdiensten"
+        ]
+    }
   },
   {
-  "label": "harmelen",
-  "full name": "Treinramp bij Harmelen",
-  "start_date": "08-01-1962",
-  "terms": [
-    "harmelen","treinramp","treinramp bij harmelen","ramp","nationale ramp",
-    "trein","treinen","reizigerstrein","stoptrein","sneltrein",
-    "botsing","frontaal","ongeval","ongeluk","ontsporing","ontspoord",
-    "spoor","spoorlijn","wissel","aftakking","gelijkvloers",
-    "utrecht","woerden","breukelen","kamerik","putkop",
-    "polder","mist","dichte mist","sein","seinen","rood sein","geel sein",
-    "remming","remmen","snelheid","km/u","locomotief","rijtuig","treinstel",
-    "mat 46","mat '46","mat 24","mat '24","plan e",
-    "ns","nederlandse spoorwegen",
-    "treindienstleider","machinist","machinisten",
-    "atb","automatische treinbeïnvloeding","treinbeïnvloeding",
-    "nx-installatie","seininstallatie",
-    "slachtoffers","doden","dodelijk","overleden","gewonden",
-    "zwaargewond","ziekenhuis","opbaring","buurkerk",
-    "93 doden","52 gewonden","91 doden",
-    "overlijdensregister","rijkspolitie","adjudant",
-    "onderzoek","spoorwegongevallenraad","openbaar onderzoek",
-    "rechtbank","proces","deskundigen",
-    "veiligheid","maatregelen","reflecterende bakens",
-    "fly-over","viaduct","ongelijkvloers",
-    "dag van nationale rouw","radio","hilversum","ernstige muziek",
-    "spoormuseum","spoorwegmuseum","museum",
-    "harmeien","harmeln","harmelcn",
-    "treinrarnp","treinramo","treinramp.",
-    "ontsporng","ontsporlng",
-    "botslng","bot sing",
-    "slachtof fers","slachtoflers",
-    "se in","se inen",
-    "machlnist","machlnisten",
-    "locomotlef","locomotlef",
-    "rijtulg","rljtuig",
-    "spoorlljn","spoorlln"
-  ]
-}
-
+    "label": "harmelen",
+    "full name": "Treinramp bij Harmelen",
+    "start_date": "08-01-1962",
+    "terms": [
+      "harmelen","treinramp","treinramp bij harmelen","ramp","nationale ramp",
+      "trein","treinen","reizigerstrein","stoptrein","sneltrein",
+      "botsing","frontaal","ongeval","ongeluk","ontsporing","ontspoord",
+      "spoor","spoorlijn","wissel","aftakking","gelijkvloers",
+      "utrecht","woerden","breukelen","kamerik","putkop",
+      "polder","mist","dichte mist","sein","seinen","rood sein","geel sein",
+      "remming","remmen","snelheid","km/u","locomotief","rijtuig","treinstel",
+      "mat 46","mat '46","mat 24","mat '24","plan e",
+      "ns","nederlandse spoorwegen",
+      "treindienstleider","machinist","machinisten",
+      "atb","automatische treinbeïnvloeding","treinbeïnvloeding",
+      "nx-installatie","seininstallatie",
+      "slachtoffers","doden","dodelijk","overleden","gewonden",
+      "zwaargewond","ziekenhuis","opbaring","buurkerk",
+      "93 doden","52 gewonden","91 doden",
+      "overlijdensregister","rijkspolitie","adjudant",
+      "onderzoek","spoorwegongevallenraad","openbaar onderzoek",
+      "rechtbank","proces","deskundigen",
+      "veiligheid","maatregelen","reflecterende bakens",
+      "fly-over","viaduct","ongelijkvloers",
+      "dag van nationale rouw","radio","hilversum","ernstige muziek",
+      "spoormuseum","spoorwegmuseum","museum",
+      "harmeien","harmeln","harmelcn",
+      "treinrarnp","treinramo","treinramp.",
+      "ontsporng","ontsporlng",
+      "botslng","bot sing",
+      "slachtof fers","slachtoflers",
+      "se in","se inen",
+      "machlnist","machlnisten",
+      "locomotlef","locomotlef",
+      "rijtulg","rljtuig",
+      "spoorlljn","spoorlln"
+    ],
+    "term_groups": {
+        "location": [
+            "harmelen","utrecht","woerden","breukelen","kamerik","putkop","polder"
+        ],
+        "vehicle": [
+            "trein","treinen","locomotief","rijtuig","treinstel","stoptrein","sneltrein","ns","spoorlijn","spoor"
+        ],
+        "event_type": [
+            "treinramp","botsing","frontaal","ontsporing","ongeluk","ramp","crash"
+        ],
+        "conditions": [
+            "mist","sein","seinen","seininstallatie","atb","snelheid","remmen","wissel"
+        ],
+        "impact": [
+            "slachtoffers","doden","gewonden","dodelijk","ziekenhuis","zwaargewond","overlijden"
+        ]
+    }
+  },
+  {
+    "label": "watersnood",
+    "full name": "Watersnoodramp 1953",
+    "start_date": "01-02-1953",
+    "terms": [
+      "watersnoodramp","watersnood","waterramp","overstroming","overstrooming",
+      "inundatie","watervloed","vloed","hoogwater","springvloed",
+      "springtij","springgetij","getij","stormvloed","noordwesterstorm",
+      "opstuwing","watermassa","watergeweld",
+      "dijkdoorbraak","dijkbreuk","dijkval",
+      "verdronken","verdrinking","omgekomen","overleden","dooden","doden",
+      "slachtoffers","rampzaligen","getroffenen","vermisten",
+      "dakloos","ellende","ontzetting","ontreddering",
+      "evacuatie","ontruiming","redding","hulpactie","noodhulp",
+      "watersnoot","watersnoodt",
+      "overstrorning","overstromlng","overstrommg","overstroomlng",
+      "sprlngtij","sprlngvloed","stormvlocd","storrnvloed",
+      "zeeland","walcheren","schouwen","duiveland","tholen","beveland",
+      "goeree","overflakkee","voorne","putten","alblasserwaard",
+      "hoeksche waard","zierikzee","goes","middelburg","vlissingen"
+    ],
+    "term_groups": {
+        "location": [
+            "zeeland","walcheren","schouwen","duiveland","tholen","beveland",
+            "goeree","overflakkee","voorne","putten","alblasserwaard",
+            "hoeksche waard","zierikzee","goes","middelburg","vlissingen"
+        ],
+        "event_type": [
+            "watersnood","watersnoodramp","waterramp","overstroming","overstrooming",
+            "inundatie","dijkdoorbraak","dijkbreuk","stormvloed","vloed","hoogwater"
+        ],
+        "cause": [
+            "springtij","springvloed","springgetij","noordwesterstorm","opstuwing",
+            "watermassa","watergeweld","getij"
+        ],
+        "impact": [
+            "slachtoffers","doden","verdronken","vermisten","dakloos",
+            "evacuatie","redding","noodhulp","rampzaligen","getroffenen"
+        ]
+    }
+  }
 ]

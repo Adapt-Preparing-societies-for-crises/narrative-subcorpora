@@ -46,7 +46,8 @@ def events(path):
     """List events defined in a JSON file."""
     evts = Event.load_all(path)
     for ev in evts:
-        click.echo(f"  {ev.label:20s} {ev.full_name} ({ev.start_date})")
+        groups_info = f"  [{', '.join(ev.term_groups)}]" if ev.term_groups else ""
+        click.echo(f"  {ev.label:20s} {ev.full_name} ({ev.start_date}){groups_info}")
 
 
 # ── describe ──────────────────────────────────────────────────────────
@@ -81,17 +82,44 @@ def _parse_window(window: str) -> int:
 @click.option("--min-score", default=0.0, type=float, help="Minimum score threshold.")
 @click.option("--text-col", default="text", help="Name of the text column.")
 @click.option("--date-col", default="date", help="Name of the date column.")
+@click.option(
+    "--grouped", is_flag=True, default=False,
+    help="Use grouped scoring (requires term_groups in the event definition).",
+)
+@click.option(
+    "--combine",
+    default="geometric",
+    type=click.Choice(["geometric", "weighted_sum", "min", "product"]),
+    help="Combination strategy for grouped scoring (default: geometric).",
+)
 @click.option("-o", "--output", required=True, help="Output path (.parquet or .csv).")
-def extract(corpus, events_path, event_label, window, min_score, text_col, date_col, output):
-    """Extract a subcorpus around an event."""
+def extract(corpus, events_path, event_label, window, min_score, text_col, date_col,
+            grouped, combine, output):
+    """Extract a subcorpus around an event.
+
+    By default uses flat term-coverage scoring.  Pass --grouped to use
+    per-group scoring with the groups defined in the event's JSON entry.
+    """
     c = Corpus(corpus, text_col=text_col, date_col=date_col)
     ev = Event.from_json(events_path, event_label)
     months = _parse_window(window)
 
-    sub = c.after(ev, months=months).score(terms=ev.terms)
+    if grouped:
+        if not ev.term_groups:
+            raise click.UsageError(
+                f"Event '{ev.label}' has no term_groups defined in the JSON file. "
+                "Add a 'term_groups' entry or use flat scoring (omit --grouped)."
+            )
+        sub = c.after(ev, months=months).score_grouped(
+            ev.term_groups, combine=combine
+        )
+        score_col = "score_grouped"
+    else:
+        sub = c.after(ev, months=months).score(terms=ev.terms)
+        score_col = "score"
 
     if min_score > 0:
-        sub = sub.above(min_score)
+        sub = sub.above(min_score, col=score_col)
 
     out = Path(output)
     if out.suffix == ".csv":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 import duckdb
 import pandas as pd
@@ -19,6 +20,8 @@ from .score import (
     build_doc_frequencies,
     term_cluster_score,
     weighted_term_score,
+    group_term_scores,
+    combine_group_scores,
 )
 
 
@@ -239,6 +242,107 @@ class Subcorpus:
         self._df[col] = self._df[self.text_col].apply(
             lambda t: weighted_term_score(str(t), term_weights)
         )
+        return self
+
+    def score_grouped(
+        self,
+        term_groups: dict[str, list[str]],
+        *,
+        weights: dict[str, float] | None = None,
+        combine: str | Callable[[dict[str, float]], float] = "geometric",
+        col: str = "score_grouped",
+    ) -> Subcorpus:
+        """Score texts using named term groups combined into a single score.
+
+        Computes a per-group term-coverage score for each group in
+        ``term_groups``, writes the per-group scores to columns named
+        ``score_{group_name}``, and then combines them into a single
+        column named *col*.
+
+        Parameters
+        ----------
+        term_groups : dict[str, list[str]]
+            Mapping from group name to list of seed terms.  Typical
+            groups are ``"location"``, ``"event_type"``, and
+            ``"impact"``.  Use ``event.term_groups`` to load groups
+            defined in ``events.json``.
+        weights : dict[str, float], optional
+            Per-group weights for the ``"weighted_sum"`` combination
+            strategy.  Groups not listed default to weight 1.0.
+            Ignored by other strategies.
+        combine : str or callable
+            How to combine per-group scores into a single value:
+
+            - ``"geometric"`` *(default)* — geometric mean.  Requires
+              non-zero evidence in *every* group; an article silent on
+              any group scores zero.
+            - ``"weighted_sum"`` — weighted average.  A strong group
+              can compensate for a weak one.
+            - ``"min"`` — minimum across groups.  The bottleneck group
+              determines the combined score.
+            - ``"product"`` — product of all scores.
+
+            Pass a callable ``f(scores: dict[str, float]) -> float``
+            for fully custom logic.
+        col : str
+            Name of the combined output column (default
+            ``"score_grouped"``).  Per-group columns are written as
+            ``score_{group_name}``.
+
+        Returns
+        -------
+        Subcorpus
+            Returns *self* so calls can be chained.
+
+        Examples
+        --------
+        Using term groups from an event definition::
+
+            event = Event.from_json("events.json", "watersnood")
+            sub = (
+                corpus
+                .after(event, months=6)
+                .score_grouped(event.term_groups)
+                .above(0.0, col="score_grouped")
+            )
+
+        Inline group definition with custom weights::
+
+            groups = {
+                "location":   ["zeeland", "walcheren", "tholen"],
+                "event_type": ["overstroming", "dijkbreuk", "stormvloed"],
+            }
+            sub = corpus.after(event, months=6).score_grouped(
+                groups,
+                weights={"location": 1.5, "event_type": 2.0},
+                combine="weighted_sum",
+            )
+        """
+        if not term_groups:
+            raise ValueError("term_groups must not be empty.")
+
+        texts = self._df[self.text_col].astype(str).tolist()
+
+        # Per-group scores for all texts (one list per group)
+        per_group: dict[str, list[float]] = {
+            group: [group_term_scores(text, {group: terms})[group] for text in texts]
+            for group, terms in term_groups.items()
+        }
+
+        # Write per-group score columns
+        for group, scores in per_group.items():
+            self._df[f"score_{group}"] = scores
+
+        # Combine into a single score per text
+        self._df[col] = [
+            combine_group_scores(
+                {group: per_group[group][i] for group in term_groups},
+                weights=weights,
+                combine=combine,
+            )
+            for i in range(len(texts))
+        ]
+
         return self
 
     def embed(
